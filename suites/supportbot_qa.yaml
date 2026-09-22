@@ -1,0 +1,78 @@
+# Evaluation suite: supportbot quality gate.
+# Version this file like code. Every change to prompts, retrieval, or model
+# should re-run it; regressions vs the last passing baseline fail the build.
+
+suite: supportbot-qa
+version: 1
+threshold: 1.0   # all checks must pass
+
+cases:
+  - id: refund-policy
+    query: "How do I get a refund for my order?"
+    judges:
+      - type: contains
+        args: {keywords: ["refund"]}
+      - type: groundedness
+        args: {min_score: 0.7}
+      - type: llm_judge
+        args:
+          criterion: "The response clearly and accurately answers how to get a refund, using the documentation."
+          min_score: 4
+      - type: retrieval_score
+        args: {min_score: 0.10}
+
+  - id: shipping-times
+    query: "How long does standard shipping take within India?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}
+      - type: llm_judge
+        args:
+          criterion: "The response states the standard shipping timeframe clearly."
+          min_score: 4
+
+  - id: account-deletion
+    query: "How can I delete my account and my data?"
+    judges:
+      - type: contains
+        args: {keywords: ["account"]}
+      - type: groundedness
+        args: {min_score: 0.7}
+
+  - id: password-reset
+    query: "I forgot my password, how do I reset it?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}
+      - type: llm_judge
+        args:
+          criterion: "The response explains the password reset process accurately."
+          min_score: 4
+
+  - id: warranty-claim
+    query: "What is covered under the product warranty and how do I make a claim?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}
+      - type: length
+        args: {min_words: 5, max_words: 400}
+
+  - id: order-tracking
+    query: "How do I track my order status?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}
+      - type: retrieval_score
+        args: {min_score: 0.10}
+
+  - id: international-shipping
+    query: "Do you ship internationally and what are the charges?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}
+
+  - id: support-hours
+    query: "What are your customer support hours and how do I contact you?"
+    judges:
+      - type: groundedness
+        args: {min_score: 0.7}

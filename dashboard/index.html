@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LLM Evaluation & Observability Engine</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262a34; --fg:#e6e8ee; --muted:#8b90a0;
+          --good:#3fb68b; --bad:#e05260; --warn:#e0a452; --accent:#6c8cff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; padding:24px; }
+  h1 { font-size:20px; margin-bottom:2px; }
+  .sub { color:var(--muted); margin-bottom:20px; font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .kpi .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .kpi .value { font-size:24px; font-weight:600; margin-top:4px; }
+  .row { display:grid; grid-template-columns:1.2fr 1fr; gap:14px; margin-bottom:14px; }
+  .card h2 { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:10px; }
+  canvas { max-height:260px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; }
+  .ok { color:var(--good); } .fail { color:var(--bad); } .warn { color:var(--warn); }
+  .alerts li { margin:4px 0; color:var(--bad); list-style:none; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; border:1px solid var(--line); }
+</style>
+</head>
+<body>
+  <h1>LLM Evaluation & Observability Engine</h1>
+  <div class="sub">regression suites &middot; drift detection &middot; cost & latency tracing &middot; canary comparison</div>
+
+  <div class="grid" id="kpis"></div>
+
+  <div class="row">
+    <div class="card"><h2>Traffic: latency & cost by day</h2><canvas id="trafficChart"></canvas></div>
+    <div class="card"><h2>Eval runs: pass rate</h2><canvas id="evalChart"></canvas></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Drift report (week 1 vs week 2)</h2>
+      <div id="drift"></div>
+    </div>
+    <div class="card">
+      <h2>Canary: old vs new model</h2>
+      <div id="canary"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent traces</h2>
+    <div style="overflow:auto"><table id="traces"></table></div>
+  </div>
+
+<script>
+const fmt = (x, d=2) => (x===null||x===undefined) ? "-" : Number(x).toFixed(d);
+
+async function load() {
+  const [summary, traffic, evals, drift, canary, traces] = await Promise.all([
+    fetch("/api/summary").then(r=>r.json()),
+    fetch("/api/traffic").then(r=>r.json()),
+    fetch("/api/evals").then(r=>r.json()),
+    fetch("/api/drift").then(r=>r.json()),
+    fetch("/api/canary").then(r=>r.json()),
+    fetch("/api/traces").then(r=>r.json()),
+  ]);
+
+  document.getElementById("kpis").innerHTML = [
+    ["Requests", summary.requests],
+    ["Avg latency", fmt(summary.avg_latency_ms,0) + " ms"],
+    ["Total cost", "$" + fmt(summary.total_cost_usd, 4)],
+    ["Eval runs", summary.eval_runs + " (" + fmt(summary.suite_pass_rate*100,0) + "% passed)"],
+  ].map(([l,v]) => `<div class="card kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+
+  new Chart(trafficChart, { data: {
+      labels: traffic.map(t=>"day "+t.day),
+      datasets: [
+        { type:"line", label:"avg latency (ms)", data:traffic.map(t=>+fmt(t.avg_latency_ms,0)), borderColor:"#6c8cff", yAxisID:"y", tension:.3 },
+        { type:"bar", label:"retrieval score", data:traffic.map(t=>+fmt(t.avg_retrieval_score,3)), backgroundColor:"rgba(63,182,139,.6)", yAxisID:"y1" },
+    ]}, options:{ responsive:true, plugins:{legend:{labels:{color:"#8b90a0"}}},
+      scales:{ x:{ticks:{color:"#8b90a0"},grid:{color:"#262a34"}},
+               y:{position:"left",ticks:{color:"#8b90a0"},grid:{color:"#262a34"}},
+               y1:{position:"right",ticks:{color:"#8b90a0"},grid:{display:false}}} }});
+
+  new Chart(evalChart, { type:"bar",
+    data:{ labels: evals.map(e=>"run "+e.id),
+      datasets:[{ label:"pass rate", data: evals.map(e=>e.summary.pass_rate),
+        backgroundColor: evals.map(e=>e.passed ? "rgba(63,182,139,.8)" : "rgba(224,82,96,.8)") }] },
+    options:{ responsive:true, scales:{ x:{ticks:{color:"#8b90a0"},grid:{color:"#262a34"}},
+      y:{min:0,max:1,ticks:{color:"#8b90a0"},grid:{color:"#262a34"}} },
+      plugins:{legend:{display:false}} }});
+
+  let d = "<ul class='alerts'>" + (drift.alerts||[]).map(a=>`<li>⚠ ${a}</li>`).join("") + "</ul>";
+  if (drift.metrics) d += "<table><tr><th>metric</th><th>PSI</th><th>KS p</th><th>ref &rarr; cur mean</th><th>verdict</th></tr>"
+    + Object.entries(drift.metrics).filter(([k])=>k!=="semantic").map(([k,m]) =>
+      `<tr><td>${k}</td><td>${fmt(m.psi,3)}</td><td>${fmt(m.ks_p,4)}</td>
+       <td>${fmt(m.ref_mean,1)} &rarr; ${fmt(m.cur_mean,1)}</td>
+       <td class="${m.verdict=="STABLE"?"ok":"warn"}">${m.verdict}</td></tr>`).join("") + "</table>";
+  if (drift.metrics && drift.metrics.semantic)
+    d += `<div style="margin-top:8px;color:var(--muted)">semantic: similarity ${drift.metrics.semantic.mean_similarity}, vocab jaccard ${drift.metrics.semantic.vocab_jaccard}</div>`;
+  document.getElementById("drift").innerHTML = d || "no drift report yet";
+
+  let c = canary && canary.cases ? `<table><tr><th>case</th><th>${canary.label_a}</th><th>${canary.label_b}</th><th>&Delta;</th></tr>`
+    + canary.cases.map(r=>`<tr><td>${r.case}</td><td>${fmt(r.score_a)}</td><td>${fmt(r.score_b)}</td>
+      <td class="${r.delta>0?"ok":(r.delta<0?"fail":"")}">${(r.delta>0?"+":"")+fmt(r.delta,3)}</td></tr>`).join("") + "</table>"
+    + `<div style="margin-top:8px">paired t=${canary.paired_t.t}, p=${canary.paired_t.p} &rarr;
+       <span class="pill ${canary.promote?"ok":"fail"}">${canary.verdict}</span></div>` : "no canary report yet";
+  document.getElementById("canary").innerHTML = c;
+
+  document.getElementById("traces").innerHTML =
+    "<tr><th>trace</th><th>day</th><th>query</th><th>model</th><th>latency</th><th>tokens</th><th>retr. score</th></tr>"
+    + traces.map(t=>`<tr><td>${t.trace_id.slice(0,8)}</td><td>${t.day}</td><td>${t.query.slice(0,48)}</td>
+      <td>${t.model}</td><td>${fmt(t.latency_ms,0)} ms</td><td>${t.completion_tokens}</td><td>${fmt(t.top_retrieval_score,3)}</td></tr>`).join("");
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+
+========================================================================
+  STEP 1 - Baseline evaluation suite (healthy model)
+========================================================================
+  model=mock/supportbot-v1
+  checks passed: 16/16 (100%) -> suite_passed=True
+
+========================================================================
+  STEP 2 - Replaying 14 days of simulated production traffic
+========================================================================
+  logged 84 requests across 14 days
+  ... days 1-7: healthy model, days 8-14: DEGRADED model (silent update)
+
+========================================================================
+  STEP 3 - Regression suite on the updated model
+========================================================================
+  model=mock/supportbot-v1.1-regressed
+  checks passed: 3/16 (19%)
+  regressions vs baseline: 13
+   [REGRESSION] refund-policy          contains:refund          1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] refund-policy          groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] refund-policy          llm_judge                0.80 -> 0.20 (passed=True -> False)
+   [REGRESSION] shipping-times         groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] shipping-times         llm_judge                0.80 -> 0.20 (passed=True -> False)
+   [REGRESSION] account-deletion       contains:account         1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] account-deletion       groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] password-reset         groundedness             1.00 -> 0.50 (passed=True -> False)
+   [REGRESSION] password-reset         llm_judge                1.00 -> 0.40 (passed=True -> False)
+   [REGRESSION] warranty-claim         groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] order-tracking         groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] international-shipping groundedness             1.00 -> 0.00 (passed=True -> False)
+   [REGRESSION] support-hours          groundedness             1.00 -> 0.50 (passed=True -> False)
+
+========================================================================
+  STEP 4 - Drift detection over the traffic log (week 1 vs week 2)
+========================================================================
+  latency_ms         PSI=2.8672   KS_p=0.00055    mean 460.682 -> 388.403  [MAJOR_DRIFT]
+  completion_tokens  PSI=15.2839  KS_p=0.0        mean 75.548 -> 22.429  [MAJOR_DRIFT]
+  cost_usd           PSI=0.0      KS_p=1.0        mean 0.0 -> 0.0  [STABLE]
+  response_words     PSI=15.2839  KS_p=0.0        mean 300.619 -> 87.714  [MAJOR_DRIFT]
+  semantic: similarity=0.0943 vocab_jaccard=0.0046
+  drift_detected=True, alerts=4
+   [ALERT] latency_ms: MAJOR_DRIFT (PSI=2.867, KS p=0.0005, mean 460.68 -> 388.40)
+   [ALERT] completion_tokens: MAJOR_DRIFT (PSI=15.284, KS p=0.0000, mean 75.55 -> 22.43)
+   [ALERT] response_words: MAJOR_DRIFT (PSI=15.284, KS p=0.0000, mean 300.62 -> 87.71)
+   [ALERT] semantic drift: similarity to reference corpus fell to 0.0943, vocab jaccard 0.0046
+
+========================================================================
+  STEP 5 - Canary comparison (old model vs new model, paired)
+========================================================================
+  supportbot-v1 (mock/supportbot-v1) vs supportbot-v1.1-regressed (mock/supportbot-v1.1-regressed)
+  wins: {'supportbot-v1': 8, 'supportbot-v1.1-regressed': 0, 'tie': 0}
+  paired t=-8.905 p=0.0 mean_delta=-0.6875
+  verdict: WORSE  promote=False
+
+========================================================================
+  RESULT - the platform caught the silent regression end to end
+========================================================================
+  regression suite : 13 judge regressions flagged
+  drift detection  : 4 statistical alerts
+  canary           : WORSE, promote=False
+
+  data written to : /scratch/work/llm-eval-engine/data/demo_eval.duckdb
+  launch dashboard:  uvicorn api.app:app --port 8000
+  then open       :  http://localhost:8000
